@@ -5,6 +5,8 @@ def create_wires(m, df):
     data_width = m.get_params()['data_width']
     wires = {}
     for no in df.nodes:
+        if no == '\\n':
+            continue
         op = str.lower(df.nodes[no]['op'])
         for n in df.successors(no):
             req_r = m.Wire('req_%s_%s' % (no, n))
@@ -170,11 +172,13 @@ def make_async_operator():
     )
     genfor = m.GenerateFor(g(0), g < input_size, g.inc(), 'rcv')
     genfor.Always(Posedge(ack_l[g]))(
-        din_r[Mul(data_width, g):Mul(data_width, g + 1)](din[Mul(data_width, g):Mul(data_width, g + 1)])
+        din_r[Mul(data_width, g):Mul(data_width, g + 1)
+              ](din[Mul(data_width, g):Mul(data_width, g + 1)])
     )
 
     operator = make_operator()
-    param = [('input_size', input_size), ('op', op), ('immediate', immediate), ('data_width', data_width)]
+    param = [('input_size', input_size), ('op', op),
+             ('immediate', immediate), ('data_width', data_width)]
     con = [('din', din_r), ('dout', dout)]
     m.Instance(operator, 'operator', param, con)
 
@@ -196,7 +200,8 @@ def make_operator():
     ternary_code = 'assign dout = din[data_width-1:0]%sdin[data_width*2-1:data_width]%sdin[data_width*3-1:data_width*2];'
 
     genif = m.GenerateIf(fanin == 1, 'gen_op')
-    genif.GenerateIf(OrList(Eql(op, "reg"), Eql(op, "in"), Eql(op, "out"))).EmbeddedCode('assign dout = din;')
+    genif.GenerateIf(OrList(Eql(op, "reg"), Eql(op, "in"), Eql(
+        op, "out"))).EmbeddedCode('assign dout = din;')
     genif.GenerateIf(Eql(op, "addi")).EmbeddedCode(unary_code % '+')
     genif.GenerateIf(Eql(op, "subi")).EmbeddedCode(unary_code % '-')
     genif.GenerateIf(Eql(op, "muli")).EmbeddedCode(unary_code % '*')
@@ -220,6 +225,8 @@ def make_dataflow(df):
     wires = create_wires(m, df)
     operator = make_async_operator()
     for no in df.nodes:
+        if no == '\\n':
+            continue
         op = str.lower(df.nodes[no]['op'])
         immediate = get_immediate(df.nodes[no])
         input_size = df.in_degree(no)

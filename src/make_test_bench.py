@@ -2,6 +2,7 @@ from veriloggen import *
 
 from make_component import make_dataflow
 
+
 def make_producer():
     m = Module('producer')
     data_width = m.Parameter('data_width', 8)
@@ -46,6 +47,7 @@ def make_producer():
 
 def make_consumer():
     m = Module('consumer')
+    consumer_id = m.Parameter('consumer_id', 0)
     data_width = m.Parameter('data_width', 8)
     fail_rate = m.Parameter('fail_rate', 0)
     clk = m.Input('clk')
@@ -70,13 +72,15 @@ def make_consumer():
                 req(1)
             ),
             If(ack)(
-                count.inc()
+                count.inc(),
+                Write('c_%d %d, ', consumer_id, din)
             )
         )
     )
     return m
 
-def make_test_bench(file,dataflow_dot):
+
+def make_test_bench(file, dataflow_dot):
     dataflow = make_dataflow(dataflow_dot)
     m = Module(file)
     data_width = m.Localparam('data_width', 8)
@@ -97,9 +101,29 @@ def make_test_bench(file,dataflow_dot):
             m.Wire(p, df_ports[p].width)
 
     ports = m.get_vars()
-    count_producer = m.Wire('count_producer', 32)
-    count_consumer = m.Wire('count_consumer', 32)
+
+    n_in = 0
+    n_out = 0
+    for no in dataflow_dot.nodes:
+        if no == '\\n':
+            continue
+        op = str.lower(dataflow_dot.nodes[no]['op'])
+        if op == 'in':
+            n_in += 1
+        elif op == 'out':
+            n_out += 1
+
+    count_producer = m.Wire('count_producer', 32, n_in)
+    count_consumer = m.Wire('count_consumer', 32, n_out)
     count_clock = m.Real('count_clock', 32)
+
+    m.EmbeddedCode('')
+    consumers_done = m.Wire('consumers_done',n_out)
+    done = m.Wire('done')
+    for i in range(n_out):
+        consumers_done[i].assign(count_consumer[i] >= max_data_size)
+
+    done.assign(Uand(consumers_done))
 
     simulation.setup_clock(m, clk, hperiod=1)
     simulation.setup_reset(m, rst, period=1)
@@ -109,27 +133,55 @@ def make_test_bench(file,dataflow_dot):
             count_clock(0)
         ),
         count_clock.inc(),
-        If(count_consumer >= max_data_size)(
-            Display(file +" throughput: %5.2f%%", Mul(100.0, (count_consumer / (count_clock / 4.0)))),
+        If(done)(
+            Display(file + " throughput: %5.2f%%", Mul(100.0,
+                    (count_consumer[0] / (count_clock / 4.0)))),
             Finish()
         )
     )
     p = make_producer()
     c = make_consumer()
+    c_in = 0
+    c_out = 0
     for no in dataflow_dot.nodes:
+        if no == '\\n':
+            continue
         op = str.lower(dataflow_dot.nodes[no]['op'])
         if op == 'in':
-            param = [('data_width', data_width), ('fail_rate', fail_rate_producer), ('initial_value', initial_value),
-                     ('is_const', is_const)]
-            con = [('clk', clk), ('rst', rst), ('req', ports['din_req_%s' % no]), ('ack', ports['din_ack_%s' % no]),
-                   ('dout', ports['din_%s' % no]), ('count', count_producer)]
+            param = [
+                ('data_width', data_width),
+                ('fail_rate', fail_rate_producer),
+                ('initial_value', initial_value),
+                ('is_const', is_const)
+            ]
+            con = [
+                ('clk', clk),
+                ('rst', rst),
+                ('req', ports['din_req_%s' % no]),
+                ('ack', ports['din_ack_%s' % no]),
+                ('dout', ports['din_%s' % no]),
+                ('count', count_producer[c_in])
+            ]
             m.Instance(p, p.name + '_%s' % no, param, con)
+            c_in += 1
         elif op == 'out':
-            param = [('data_width', data_width), ('fail_rate', fail_rate_consumer)]
-            con = [('clk', clk), ('rst', rst), ('req', ports['dout_req_%s' % no]), ('ack', ports['dout_ack_%s' % no]),
-                   ('din', ports['dout_%s' % no]), ('count', count_consumer)]
+            param = [
+                ('consumer_id', int(no)),
+                ('data_width', data_width),
+                ('fail_rate', fail_rate_consumer)
+            ]
+            con = [
+                ('clk', clk),
+                ('rst', rst),
+                ('req', ports['dout_req_%s' % no]),
+                ('ack', ports['dout_ack_%s' % no]),
+                ('din', ports['dout_%s' % no]),
+                ('count', count_consumer[c_out])
+            ]
             m.Instance(c, c.name + '_%s' % no, param, con)
+            c_out += 1
 
-    m.Instance(dataflow, dataflow.name, dataflow.get_params(), dataflow.get_ports())
+    m.Instance(dataflow, dataflow.name,
+               dataflow.get_params(), dataflow.get_ports())
 
     return m
