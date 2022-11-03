@@ -42,7 +42,7 @@ def create_wires(m, df):
 def get_immediate(no):
     immediate = 0
     operators = ['addi', 'subi', 'muli']
-    name = str.lower(no['label'])
+    name = str.lower(no['op'])
     if name in operators:
         immediate = int(no['value'])
     return immediate

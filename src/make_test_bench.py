@@ -5,6 +5,7 @@ from make_component import make_dataflow
 
 def make_producer():
     m = Module('producer')
+    producer_id = m.Parameter('producer_id',0)
     data_width = m.Parameter('data_width', 8)
     fail_rate = m.Parameter('fail_rate', 0)
     is_const = m.Parameter('is_const', 'false')
@@ -31,6 +32,9 @@ def make_producer():
             ack(0),
             randd(EmbeddedCode('$abs($random%101)+1')),
             stop(Mux(randd > fail_rate, 0, 1)),
+            If(ack)(
+                Write("p_%d,%d\\n",producer_id,dout)
+            ),
             If(req & ~ack & Not(stop))(
                 ack(1),
                 dout(dout_next),
@@ -73,7 +77,7 @@ def make_consumer():
             ),
             If(ack)(
                 count.inc(),
-                Write('c_%d %d, ', consumer_id, din)
+                Write("c_%d %d\\n", consumer_id, din)
             )
         )
     )
@@ -149,6 +153,7 @@ def make_test_bench(file, dataflow_dot):
         op = str.lower(dataflow_dot.nodes[no]['op'])
         if op == 'in':
             param = [
+                ('producer_id',int(no)),
                 ('data_width', data_width),
                 ('fail_rate', fail_rate_producer),
                 ('initial_value', initial_value),
